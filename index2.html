@@ -274,21 +274,14 @@ input[type=number]{-moz-appearance:textfield}
    <tbody id="entries-body"></tbody>
   </table>
   <div class="profit-box">
-   <div class="profit-box-title">רווח/הפסד — מחיר נוכחי / יציאה</div>
+   <div class="profit-box-title">רווח/הפסד — לפי מחיר סגירה נוכחי</div>
    <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border)">
-    <label style="font-size:13px;color:var(--text);white-space:nowrap">מחיר סגירה:</label>
-    <span id="stock-close-price" style="font-family:var(--mono);font-size:16px;font-weight:700;color:var(--accent)">—</span>
+    <label style="font-size:13px;color:var(--text);white-space:nowrap">מחיר סגירה נוכחי:</label>
+    <span id="stock-close-price" style="font-family:var(--mono);font-size:20px;font-weight:800;color:var(--accent)">—</span>
     <span style="font-size:11px;color:var(--muted)">שינוי יומי:</span>
-    <span id="stock-close-chg" style="font-family:var(--mono);font-size:12px;font-weight:700"></span>
+    <span id="stock-close-chg" style="font-family:var(--mono);font-size:13px;font-weight:700"></span>
    </div>
-   <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-    <div class="profit-row" style="margin-bottom:0">
-     <label>מחיר נוכחי / יציאה:</label>
-     <input type="number" id="current-price-input" placeholder="0.00" step="0.01" oninput="calcProfit();syncToJournal()">
-    </div>
-    <button onclick="refreshLiveCalc()" id="live-calc-btn" style="display:none;background:none;border:1.5px solid #c0d8f0;border-radius:var(--radius-sm);padding:5px 11px;font-size:11px;color:var(--blue);cursor:pointer;font-weight:700">🔄 מחיר עכשיו</button>
-    <span id="live-calc-tag" style="font-family:var(--mono);font-size:12px"></span>
-   </div>
+   <input type="hidden" id="current-price-input" value="">
    <div class="comm-row">
     <label>עמלה:</label>
     <input type="text" id="trade-commission" placeholder="5.5+5.5" style="width:120px;background:var(--bg);border:1.5px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:5px 8px;font-size:13px;direction:ltr;outline:none;font-family:var(--mono)" oninput="calcProfit();syncToJournal()">
@@ -602,6 +595,7 @@ async function refreshLivePrice(){
   const live=await fetchLivePrice(currentTicker);
   if(live){
     updateLivePanel(currentTicker,live.price,live.chg,live.chgPct,live.time);
+    // עדכן מחיר נוכחי (hidden) לחישוב P&L
     document.getElementById('current-price-input').value=live.price.toFixed(2);
     window._lastDailyChg=live.chg;
     window._lastDailyChgPct=live.chgPct;
@@ -646,10 +640,11 @@ function newTrade(){
   document.getElementById('placeholder').style.display='block';
   document.getElementById('profit-summary').style.display='none';
   document.getElementById('current-price-input').value='';
+  window._lockedEntryP=null;
   document.getElementById('loaded-banner').style.display='none';
   document.getElementById('atr-lock-display').style.display='none';
   document.getElementById('live-panel').style.display='none';
-  document.getElementById('live-calc-btn').style.display='none';
+  // live-calc-btn הוסר
   document.getElementById('trade-date').value=new Date().toISOString().split('T')[0];
   document.getElementById('journal-notes').value='';
   document.getElementById('journal-status').value='open';
@@ -785,11 +780,12 @@ async function fetchAll(ticker){
 
     // ── renderResults עם מחיר כניסה נעול (ליציאות) ──
     renderResults(useEntryP,useATR,ticker,latestDate);
-    if(priceFromAPI)document.getElementById('current-price-input').value=fmt(currentPrice,2);
+    // מחיר סגירה נוכחי → שדה hidden → P&L מחושב אוטומטית
+    document.getElementById('current-price-input').value=fmt(latestClose,2);
     calcProfit();
 
     // כפתור רענון
-    document.getElementById('live-calc-btn').style.display='inline-block';
+    // live-calc-btn הוסר
 
   }catch(e){
     status.innerHTML='<span style="color:var(--red)">'+e.message+'</span>';
@@ -893,7 +889,7 @@ function applyStop(P,ATR,stop,ticker,date){
   renderEntries(ex1p);
   renderExitManual();
   document.getElementById('results').style.display='block';
-  document.getElementById('live-calc-btn').style.display=currentTicker&&currentTicker!=='ידני'?'inline-block':'none';
+  // live-calc-btn הוסר
 }
 
 function renderTotalProfit(P,ATR,ex1p,ex2p,ex3p,ex1s,ex2s,ex3s,stop,totalShares){
@@ -1075,7 +1071,7 @@ function saveToJournal(){
   const commExpr=document.getElementById('trade-commission').value.trim();
   const s=[entryData[0]?.shares||0, entryData[1]?.shares||0, entryData[2]?.shares||0];
   const totalSh=s.reduce((a,sh,i)=>a+(executedEntries[i]?sh:0),0);
-  const exitP=parseFloat(document.getElementById('current-price-input').value)||null;
+  const exitP=parseFloat(document.getElementById('current-price-input').value)||currentPrice||null;
   const newId=currentJournalId||Date.now();
   const rec={
     id:newId,
@@ -1098,18 +1094,10 @@ function saveToJournal(){
     notes:document.getElementById('journal-notes').value.trim()
   };
 
-  // ── שמור ATR נעול ב-atrStore — רק בשמירה ראשונה ──
-  // בעדכון חוזר — לא דורסים את מחיר הכניסה המקורי
-  const entryPrice1 = prices[0]; // מחיר כניסה #1
+  // ── שמור ATR נעול ב-atrStore — מחיר כניסה #1 בלבד, לא מחיר נוכחי ──
+  const entryPrice1 = prices[0]; // מחיר כניסה #1 — קבוע לנצח
   if(currentATR && entryPrice1){
-    const existingLock = atrGet(newId);
-    if(!existingLock){
-      // שמירה ראשונה — שמור מחיר כניסה #1 כנעול
-      atrSave(newId, currentATR, entryPrice1, rec.date);
-    } else {
-      // עדכון — שמור רק ATR, שמור מחיר כניסה מקורי
-      atrSave(newId, currentATR, existingLock.entryPrice, existingLock.date);
-    }
+    atrSave(newId, currentATR, entryPrice1, rec.date);
   }
 
   const d=jLoad();
@@ -1193,6 +1181,7 @@ function loadRowToCalc(id){
   document.getElementById('journal-status').value=r.status||'open';
   document.getElementById('journal-notes').value=r.notes||'';
   document.getElementById('manual-stop').value=r.stop?r.stop.toFixed(2):'';
+  // curP = מחיר סגירה שנשמר — יטען ל-hidden field לחישוב P&L
   if(r.curP)document.getElementById('current-price-input').value=parseFloat(r.curP).toFixed(2);
 
   const savedId=r.id;
@@ -1256,6 +1245,7 @@ async function refreshLiveCalc(){
   if(live){
     const col=live.chg>=0?'var(--green)':'var(--red)';
     tag.innerHTML='<span style="font-weight:700;color:'+col+';background:'+(live.chg>=0?'var(--green-bg)':'var(--red-bg)')+';padding:2px 9px;border-radius:9px">$'+live.price.toFixed(2)+' '+(live.chg>=0?'+':'')+live.chg.toFixed(2)+'</span>';
+    // עדכן מחיר נוכחי (hidden) לחישוב P&L
     document.getElementById('current-price-input').value=live.price.toFixed(2);
     window._lastDailyChg=live.chg;window._lastDailyChgPct=live.chgPct;
     updateLivePanel(currentTicker,live.price,live.chg,live.chgPct,live.time);
