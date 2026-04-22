@@ -636,6 +636,7 @@ function newTrade(){
   currentJournalId=null;
   currentPrice=null;currentATR=null;currentTicker='';currentDate='';
   priceFromAPI=false;
+  window._lockedEntryP=null;
   customPrices=[null,null,null];
   executedEntries=[true,false,false];
   exitManual=[{price:null,shares:null,date:'',executed:false},{price:null,shares:null,date:'',executed:false},{price:null,shares:null,date:'',executed:false}];
@@ -682,9 +683,10 @@ function setRisk(v,el){
   document.querySelectorAll('.risk-btn').forEach(b=>b.classList.remove('active'));
   el.classList.add('active');
   if(!currentPrice||!currentATR)return;
+  const entryPForCalc=window._lockedEntryP||currentPrice;
   const s=parseFloat(document.getElementById('manual-stop')?.value);
-  if(s>0)applyStop(currentPrice,currentATR,s,currentTicker,currentDate);
-  else renderResults(currentPrice,currentATR,currentTicker,currentDate);
+  if(s>0)applyStop(entryPForCalc,currentATR,s,currentTicker,currentDate);
+  else renderResults(entryPForCalc,currentATR,currentTicker,currentDate);
 }
 
 function evalComm(s){
@@ -735,17 +737,19 @@ async function fetchAll(ticker){
     const freshATR=calcATR_TD(vals,14);
     if(!freshATR)throw new Error('לא מספיק נתונים לחישוב ATR');
 
-    // ── הלב של v2: האם יש ATR נעול לטרייד הנוכחי? ──
+    // ── הלב של v2: האם יש ATR ומחיר כניסה נעולים לטרייד הנוכחי? ──
     let useATR=freshATR;
+    let useEntryP=latestClose; // ברירת מחדל: מחיר נוכחי
     let atrIsLocked=false;
     if(currentJournalId){
       const locked=atrGet(currentJournalId);
       if(locked&&locked.atr){
         useATR=locked.atr;
+        // ── מחיר כניסה נעול — לחישוב יציאות בלבד ──
+        if(locked.entryPrice) useEntryP=locked.entryPrice;
         atrIsLocked=true;
-        // הצג badge
         const badge=document.getElementById('atr-lock-badge');
-        if(badge)badge.textContent='🔒 ATR נעול: $'+useATR.toFixed(4)+' (מכניסה '+locked.date+')';
+        if(badge)badge.textContent='🔒 ATR נעול: $'+useATR.toFixed(4)+' | כניסה: $'+useEntryP.toFixed(2)+' ('+locked.date+')';
         document.getElementById('atr-lock-display').style.display='block';
       }
     }else{
@@ -756,6 +760,7 @@ async function fetchAll(ticker){
     currentATR=useATR;
     currentTicker=ticker;
     currentDate=latestDate;
+    window._lockedEntryP=useEntryP; // שמור לשימוש ב-applyStop
     priceFromAPI=true;
     window._lastDailyChg=latestClose-prevClose;
     window._lastDailyChgPct=changePct;
@@ -765,7 +770,7 @@ async function fetchAll(ticker){
     const lockStr=atrIsLocked?' <span style="background:#e8f2fb;color:#1d6fa5;font-size:9px;padding:1px 6px;border-radius:10px;font-weight:700">ATR נעול</span>':'';
     status.innerHTML=ticker+' | '+fmtD(latestClose)+'&nbsp;<span style="color:'+cc+';font-weight:700">'+cs+'</span>'+lockStr;
 
-    // Live panel
+    // Live panel — מחיר נוכחי
     updateLivePanel(ticker,latestClose,latestClose-prevClose,changePct,'');
 
     // שדות סגירה
@@ -778,7 +783,8 @@ async function fetchAll(ticker){
       scc.style.color=dchg>=0?'var(--green)':'var(--red)';
     }
 
-    renderResults(latestClose,useATR,ticker,latestDate);
+    // ── renderResults עם מחיר כניסה נעול (ליציאות) ──
+    renderResults(useEntryP,useATR,ticker,latestDate);
     if(priceFromAPI)document.getElementById('current-price-input').value=fmt(currentPrice,2);
     calcProfit();
 
@@ -826,8 +832,9 @@ function renderResults(P,ATR,ticker,date){
 function onStopChange(){
   const stop=parseFloat(document.getElementById('manual-stop').value);
   if(!stop||stop<=0||!window._lastP)return;
-  document.getElementById('stop-pct-label').textContent=fmt(((window._lastP-stop)/window._lastP)*100,1)+'% מ-P';
-  applyStop(window._lastP,window._lastATR,stop,window._lastTicker,window._lastDate);
+  const entryPForCalc=window._lockedEntryP||window._lastP;
+  document.getElementById('stop-pct-label').textContent=fmt(((entryPForCalc-stop)/entryPForCalc)*100,1)+'% מ-P';
+  applyStop(entryPForCalc,window._lastATR,stop,window._lastTicker,window._lastDate);
 }
 
 function applyStop(P,ATR,stop,ticker,date){
@@ -855,7 +862,8 @@ function applyStop(P,ATR,stop,ticker,date){
   window._avgCost=(s1*P+s2*(P+ATR)+s3*(P+2*ATR))/(s1+s2+s3);
   if(!currentJournalId)customPrices=[null,null,null];
   // ── יציאות תמיד לפי מחיר כניסה #1 (P) — קבוע, לא משתנה ──
-  const entryP = entryData[0]?.defaultPrice || P; // מחיר כניסה #1
+  // entryP = מחיר כניסה #1 קבוע — P תמיד (P מועבר כבר כ-entryPrice מ-fetchAll)
+  const entryP = P;
   const adrPct=(ATR/entryP)*100,isVol=adrPct>=4;
   let ex1p,ex2p,ex3p,ex1n,ex2n,ex3n;
   if(isVol){ex1p=entryP*1.20;ex2p=entryP*1.30;ex3p=entryP*1.45;ex1n='+20%';ex2n='+30%';ex3n='+45%';}
