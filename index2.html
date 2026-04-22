@@ -274,14 +274,21 @@ input[type=number]{-moz-appearance:textfield}
    <tbody id="entries-body"></tbody>
   </table>
   <div class="profit-box">
-   <div class="profit-box-title">רווח/הפסד — לפי מחיר סגירה נוכחי</div>
+   <div class="profit-box-title">רווח/הפסד — מחיר נוכחי / יציאה</div>
    <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border)">
-    <label style="font-size:13px;color:var(--text);white-space:nowrap">מחיר סגירה נוכחי:</label>
-    <span id="stock-close-price" style="font-family:var(--mono);font-size:20px;font-weight:800;color:var(--accent)">—</span>
+    <label style="font-size:13px;color:var(--text);white-space:nowrap">מחיר סגירה:</label>
+    <span id="stock-close-price" style="font-family:var(--mono);font-size:16px;font-weight:700;color:var(--accent)">—</span>
     <span style="font-size:11px;color:var(--muted)">שינוי יומי:</span>
-    <span id="stock-close-chg" style="font-family:var(--mono);font-size:13px;font-weight:700"></span>
+    <span id="stock-close-chg" style="font-family:var(--mono);font-size:12px;font-weight:700"></span>
    </div>
-   <input type="hidden" id="current-price-input" value="">
+   <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <div class="profit-row" style="margin-bottom:0">
+     <label>מחיר נוכחי / יציאה:</label>
+     <input type="number" id="current-price-input" placeholder="0.00" step="0.01" oninput="calcProfit();syncToJournal()">
+    </div>
+    <button onclick="refreshLiveCalc()" id="live-calc-btn" style="display:none;background:none;border:1.5px solid #c0d8f0;border-radius:var(--radius-sm);padding:5px 11px;font-size:11px;color:var(--blue);cursor:pointer;font-weight:700">🔄 מחיר עכשיו</button>
+    <span id="live-calc-tag" style="font-family:var(--mono);font-size:12px"></span>
+   </div>
    <div class="comm-row">
     <label>עמלה:</label>
     <input type="text" id="trade-commission" placeholder="5.5+5.5" style="width:120px;background:var(--bg);border:1.5px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:5px 8px;font-size:13px;direction:ltr;outline:none;font-family:var(--mono)" oninput="calcProfit();syncToJournal()">
@@ -642,7 +649,7 @@ function newTrade(){
   document.getElementById('loaded-banner').style.display='none';
   document.getElementById('atr-lock-display').style.display='none';
   document.getElementById('live-panel').style.display='none';
-  // live-calc-btn removed
+  document.getElementById('live-calc-btn').style.display='none';
   document.getElementById('trade-date').value=new Date().toISOString().split('T')[0];
   document.getElementById('journal-notes').value='';
   document.getElementById('journal-status').value='open';
@@ -778,11 +785,11 @@ async function fetchAll(ticker){
 
     // ── renderResults עם מחיר כניסה נעול (ליציאות) ──
     renderResults(useEntryP,useATR,ticker,latestDate);
-    document.getElementById('current-price-input').value=fmt(latestClose,2);
+    if(priceFromAPI)document.getElementById('current-price-input').value=fmt(currentPrice,2);
     calcProfit();
 
     // כפתור רענון
-    // live-calc-btn removed
+    document.getElementById('live-calc-btn').style.display='inline-block';
 
   }catch(e){
     status.innerHTML='<span style="color:var(--red)">'+e.message+'</span>';
@@ -842,7 +849,15 @@ function applyStop(P,ATR,stop,ticker,date){
   document.getElementById('val-stop').textContent=fmtD(stop);
   document.getElementById('sub-stop').textContent=fmt(stopPct,1)+'% מ-P';
   document.getElementById('val-pos').textContent=fmtD(totalPos);
-  document.getElementById('sub-pos').textContent=fmt(totalShares,1)+' מניות'+(totalPos>=MAX_POS?' (מוגבל)':'');
+  document.getElementById('sub-pos').innerHTML=
+    '<span style="font-size:16px;font-weight:800;color:var(--text);font-family:var(--mono)">'+Math.round(totalShares)+'</span>'+
+    '<span style="font-size:11px;color:var(--muted);margin-right:4px"> מניות</span>'+
+    (totalPos>=MAX_POS?'<span style="font-size:10px;color:var(--amber)"> (מוגבל)</span>':'');
+  // הדגש כמות מניות
+  const cardPos2=document.getElementById('card-pos');
+  const posValEl=document.getElementById('val-pos');
+  const subPosEl=document.getElementById('sub-pos');
+  if(subPosEl){subPosEl.style.fontSize='14px';subPosEl.style.fontWeight='700';subPosEl.style.color='var(--text)';}
   document.getElementById('val-risk').textContent=fmtD(actualRisk);
   document.getElementById('sub-risk').textContent=fmt((actualRisk/CAPITAL)*100,2)+'% מהקפיטל';
   const s1=Math.floor(totalShares*0.40),rem1=totalShares-s1;
@@ -886,7 +901,7 @@ function applyStop(P,ATR,stop,ticker,date){
   renderEntries(ex1p);
   renderExitManual();
   document.getElementById('results').style.display='block';
-  // live-calc-btn removed
+  document.getElementById('live-calc-btn').style.display=currentTicker&&currentTicker!=='ידני'?'inline-block':'none';
 }
 
 function renderTotalProfit(P,ATR,ex1p,ex2p,ex3p,ex1s,ex2s,ex3s,stop,totalShares){
@@ -1121,6 +1136,22 @@ function saveToJournal(){
 
   setTimeout(()=>switchTab('journal'),500);
   renderJournal();
+  // שלוף מחיר נוכחי אוטומטית ועדכן curP ביומן
+  if(currentTicker&&currentTicker!=='ידני'){
+    const idToUpdate=currentJournalId||newId;
+    fetchLivePrice(currentTicker).then(live=>{
+      if(!live)return;
+      const d2=jLoad();
+      const rec2=d2.find(x=>x.id===idToUpdate);
+      if(rec2){
+        rec2.curP=+live.price.toFixed(2);
+        rec2.dailyChg=+live.chg.toFixed(2);
+        rec2.dailyChgPct=+live.chgPct.toFixed(2);
+        jSave(d2);
+        renderJournal();
+      }
+    });
+  }
 }
 
 function showLoadedBanner(ticker,atr,date,mode){
@@ -1235,6 +1266,8 @@ function loadRowToCalc(id){
 // ═══════════════════════════════════════════════
 async function refreshLiveCalc(){
   if(!currentTicker||currentTicker==='ידני')return;
+  const btn=document.getElementById('live-calc-btn'),tag=document.getElementById('live-calc-tag');
+  btn.textContent='⏳';btn.style.pointerEvents='none';
   const live=await fetchLivePrice(currentTicker);
   if(live){
     const col=live.chg>=0?'var(--green)':'var(--red)';
@@ -1248,7 +1281,10 @@ async function refreshLiveCalc(){
       const d=jLoad();const rec=d.find(x=>x.id===currentJournalId);
       if(rec){rec.curP=+live.price.toFixed(2);rec.dailyChg=+live.chg.toFixed(2);rec.dailyChgPct=+live.chgPct.toFixed(2);jSave(d);}
     }
+  }else{
+    tag.innerHTML='<span style="color:var(--red);font-size:11px">שגיאת API</span>';
   }
+  btn.textContent='🔄 מחיר עכשיו';btn.style.pointerEvents='';
 }
 
 // ═══════════════════════════════════════════════
