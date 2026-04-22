@@ -1098,9 +1098,18 @@ function saveToJournal(){
     notes:document.getElementById('journal-notes').value.trim()
   };
 
-  // ── שמור ATR נעול ב-atrStore ──
-  if(currentATR&&currentPrice){
-    atrSave(newId, currentATR, currentPrice, rec.date);
+  // ── שמור ATR נעול ב-atrStore — רק בשמירה ראשונה ──
+  // בעדכון חוזר — לא דורסים את מחיר הכניסה המקורי
+  const entryPrice1 = prices[0]; // מחיר כניסה #1
+  if(currentATR && entryPrice1){
+    const existingLock = atrGet(newId);
+    if(!existingLock){
+      // שמירה ראשונה — שמור מחיר כניסה #1 כנעול
+      atrSave(newId, currentATR, entryPrice1, rec.date);
+    } else {
+      // עדכון — שמור רק ATR, שמור מחיר כניסה מקורי
+      atrSave(newId, currentATR, existingLock.entryPrice, existingLock.date);
+    }
   }
 
   const d=jLoad();
