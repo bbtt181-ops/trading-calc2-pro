@@ -315,6 +315,8 @@ input[type=number]{-moz-appearance:textfield}
    <tbody id="stop-mgmt-body"></tbody>
   </table>
   <div id="total-profit-box"></div>
+  <!-- TRAILING STOP PANEL -->
+  <div id="trailing-stop-panel" style="display:none;margin-top:16px"></div>
   <div class="save-bar">
    <div>
     <label>סטטוס</label>
@@ -898,10 +900,91 @@ function applyStop(P,ATR,stop,ticker,date){
   ].map(r=>'<tr style="background:'+r.bg+'"><td><strong>'+r.step+'</strong></td><td><span class="num">'+r.trigger+'</span></td><td><span class="num" style="font-weight:700;color:'+r.col+'">'+fmtD(r.ns)+'</span></td><td style="font-weight:600;color:'+r.col+'">'+r.act+'</td><td style="color:var(--muted)">'+r.mean+'</td></tr>').join('');
   window._tpParams={P,ATR,ex1p,ex2p,ex3p,ex1s,ex2s,ex3s,stop,totalShares};
   renderTotalProfit(P,ATR,ex1p,ex2p,ex3p,ex1s,ex2s,ex3s,stop,totalShares);
+  renderTrailingStopPanel(P,ATR,ex2p);
   renderEntries(ex1p);
   renderExitManual();
   document.getElementById('results').style.display='block';
   document.getElementById('live-calc-btn').style.display=currentTicker&&currentTicker!=='ידני'?'inline-block':'none';
+}
+
+function renderTrailingStopPanel(P,ATR,ex2p){
+  const panel=document.getElementById('trailing-stop-panel');
+  if(!panel)return;
+  panel.style.display='block';
+
+  // חישובים
+  const ma10=P*1.225; // אומדן: 10-day MA ≈ מתחת ל-P+2ATR (לא ניתן לחשב בלי היסטוריה)
+  const adrPct=(ATR/P)*100;
+  const isFast=adrPct>=4; // מניה מהירה → 10-day, איטית → 20-day
+  const maLabel=isFast?'10-day MA':'20-day MA';
+  const maNote=isFast?'מניה תנודתית (ADR≥4%) — Qullamaggie משתמש ב-10-day':'מניה יציבה (ADR<4%) — Qullamaggie משתמש ב-20-day';
+
+  // Minervini: סטופ לפי תמיכה טכנית — P+0.5×ATR (רמת נועל רווח)
+  const minerviniStop=P+0.5*ATR;
+
+  panel.innerHTML=
+    '<div style="background:linear-gradient(135deg,#1a2a1a,#1a3a1a);border-radius:var(--radius);padding:16px 20px;border:1.5px solid #2a6040">'+
+    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">'+
+      '<span style="font-size:18px">🎯</span>'+
+      '<div>'+
+        '<div style="font-size:12px;font-weight:800;color:#7ed99a;text-transform:uppercase;letter-spacing:.7px">טריילינג סטופ — אחרי יציאה #2</div>'+
+        '<div style="font-size:10px;color:#4a8060;margin-top:2px">מופעל כשהמניה מגיעה ל-'+fmtD(ex2p)+' · השאר: '+Math.round(window._tpParams?.ex3s||0)+' מניות רצות</div>'+
+      '</div>'+
+    '</div>'+
+
+    // הסבר שיטות
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">'+
+
+    // Qullamaggie
+    '<div style="background:rgba(255,255,255,.07);border-radius:8px;padding:12px;border:1px solid #2a5035">'+
+      '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">'+
+        '<span style="font-size:14px">⚡</span>'+
+        '<span style="font-size:11px;font-weight:800;color:#7ed99a">Qullamaggie</span>'+
+      '</div>'+
+      '<div style="font-size:13px;font-weight:700;color:#fff;font-family:var(--mono);margin-bottom:6px">'+maLabel+'</div>'+
+      '<div style="font-size:10px;color:#4a9060;line-height:1.6;margin-bottom:8px">'+maNote+'</div>'+
+      '<div style="background:rgba(0,0,0,.3);border-radius:6px;padding:8px 10px">'+
+        '<div style="font-size:9px;color:#4a8060;margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">אופן החישוב</div>'+
+        '<div style="font-size:11px;color:#a0d8b0;line-height:1.6">'+
+          '• מניות מהירות (ADR≥4%): trail על <strong style="color:#7ed99a">10-day MA</strong><br>'+
+          '• מניות איטיות (ADR&lt;4%): trail על <strong style="color:#7ed99a">20-day MA</strong><br>'+
+          '• יציאה: <strong style="color:#ffcc60">סגירת יום</strong> מתחת ל-MA<br>'+
+          '• המתן עד שה-MA עולה מעל נקודת הכניסה<br>'+
+          '• מקור: Qullamaggie.com — "3 Timeless Setups"'+
+        '</div>'+
+      '</div>'+
+    '</div>'+
+
+    // Minervini
+    '<div style="background:rgba(255,255,255,.07);border-radius:8px;padding:12px;border:1px solid #2a3a50">'+
+      '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">'+
+        '<span style="font-size:14px">🏆</span>'+
+        '<span style="font-size:11px;font-weight:800;color:#7ec8f0">Minervini (SEPA)</span>'+
+      '</div>'+
+      '<div style="font-size:13px;font-weight:700;color:#fff;font-family:var(--mono);margin-bottom:6px">רמות תמיכה טכניות</div>'+
+      '<div style="font-size:10px;color:#3a6080;line-height:1.6;margin-bottom:8px">שיקולי/ידני — לא MA קבוע</div>'+
+      '<div style="background:rgba(0,0,0,.3);border-radius:6px;padding:8px 10px">'+
+        '<div style="font-size:9px;color:#3a6080;margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">אופן החישוב</div>'+
+        '<div style="font-size:11px;color:#90c0d8;line-height:1.6">'+
+          '• סטופ = מתחת לרמת תמיכה טכנית<br>'+
+          '• מזיז סטופ עם כל Swing Low חדש<br>'+
+          '• <strong style="color:#7ec8f0">P+0.5×ATR = '+fmtD(minerviniStop)+'</strong> (נועל רווח מינימלי)<br>'+
+          '• יציאה: פריצת תמיכה משמעותית<br>'+
+          '• מקור: SEPA Methodology — Minervini'+
+        '</div>'+
+      '</div>'+
+    '</div>'+
+    '</div>'+
+
+    // הבדל מפתח
+    '<div style="background:rgba(255,200,60,.08);border:1px solid rgba(255,200,60,.2);border-radius:6px;padding:10px 14px">'+
+      '<span style="font-size:10px;font-weight:700;color:#ffcc60;text-transform:uppercase;letter-spacing:.5px">💡 ההבדל המפתח</span>'+
+      '<div style="font-size:11px;color:#c0a040;margin-top:5px;line-height:1.6">'+
+        '<strong style="color:#ffcc60">Qullamaggie</strong> = מכאני (MA קבוע) — קל לביצוע, פחות שיקול דעת<br>'+
+        '<strong style="color:#7ec8f0">Minervini</strong> = שיקולי (תמיכות) — דורש ניסיון, גמיש יותר'+
+      '</div>'+
+    '</div>'+
+    '</div>';
 }
 
 function renderTotalProfit(P,ATR,ex1p,ex2p,ex3p,ex1s,ex2s,ex3s,stop,totalShares){
