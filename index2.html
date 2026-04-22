@@ -595,7 +595,6 @@ async function refreshLivePrice(){
   const live=await fetchLivePrice(currentTicker);
   if(live){
     updateLivePanel(currentTicker,live.price,live.chg,live.chgPct,live.time);
-    // עדכן מחיר נוכחי (hidden) לחישוב P&L
     document.getElementById('current-price-input').value=live.price.toFixed(2);
     window._lastDailyChg=live.chg;
     window._lastDailyChgPct=live.chgPct;
@@ -640,11 +639,10 @@ function newTrade(){
   document.getElementById('placeholder').style.display='block';
   document.getElementById('profit-summary').style.display='none';
   document.getElementById('current-price-input').value='';
-  window._lockedEntryP=null;
   document.getElementById('loaded-banner').style.display='none';
   document.getElementById('atr-lock-display').style.display='none';
   document.getElementById('live-panel').style.display='none';
-  // live-calc-btn הוסר
+  // live-calc-btn removed
   document.getElementById('trade-date').value=new Date().toISOString().split('T')[0];
   document.getElementById('journal-notes').value='';
   document.getElementById('journal-status').value='open';
@@ -780,12 +778,11 @@ async function fetchAll(ticker){
 
     // ── renderResults עם מחיר כניסה נעול (ליציאות) ──
     renderResults(useEntryP,useATR,ticker,latestDate);
-    // מחיר סגירה נוכחי → שדה hidden → P&L מחושב אוטומטית
     document.getElementById('current-price-input').value=fmt(latestClose,2);
     calcProfit();
 
     // כפתור רענון
-    // live-calc-btn הוסר
+    // live-calc-btn removed
 
   }catch(e){
     status.innerHTML='<span style="color:var(--red)">'+e.message+'</span>';
@@ -889,7 +886,7 @@ function applyStop(P,ATR,stop,ticker,date){
   renderEntries(ex1p);
   renderExitManual();
   document.getElementById('results').style.display='block';
-  // live-calc-btn הוסר
+  // live-calc-btn removed
 }
 
 function renderTotalProfit(P,ATR,ex1p,ex2p,ex3p,ex1s,ex2s,ex3s,stop,totalShares){
@@ -1071,7 +1068,7 @@ function saveToJournal(){
   const commExpr=document.getElementById('trade-commission').value.trim();
   const s=[entryData[0]?.shares||0, entryData[1]?.shares||0, entryData[2]?.shares||0];
   const totalSh=s.reduce((a,sh,i)=>a+(executedEntries[i]?sh:0),0);
-  const exitP=parseFloat(document.getElementById('current-price-input').value)||currentPrice||null;
+  const exitP=parseFloat(document.getElementById('current-price-input').value)||null;
   const newId=currentJournalId||Date.now();
   const rec={
     id:newId,
@@ -1181,7 +1178,6 @@ function loadRowToCalc(id){
   document.getElementById('journal-status').value=r.status||'open';
   document.getElementById('journal-notes').value=r.notes||'';
   document.getElementById('manual-stop').value=r.stop?r.stop.toFixed(2):'';
-  // curP = מחיר סגירה שנשמר — יטען ל-hidden field לחישוב P&L
   if(r.curP)document.getElementById('current-price-input').value=parseFloat(r.curP).toFixed(2);
 
   const savedId=r.id;
@@ -1239,13 +1235,10 @@ function loadRowToCalc(id){
 // ═══════════════════════════════════════════════
 async function refreshLiveCalc(){
   if(!currentTicker||currentTicker==='ידני')return;
-  const btn=document.getElementById('live-calc-btn'),tag=document.getElementById('live-calc-tag');
-  btn.textContent='⏳';btn.style.pointerEvents='none';
   const live=await fetchLivePrice(currentTicker);
   if(live){
     const col=live.chg>=0?'var(--green)':'var(--red)';
     tag.innerHTML='<span style="font-weight:700;color:'+col+';background:'+(live.chg>=0?'var(--green-bg)':'var(--red-bg)')+';padding:2px 9px;border-radius:9px">$'+live.price.toFixed(2)+' '+(live.chg>=0?'+':'')+live.chg.toFixed(2)+'</span>';
-    // עדכן מחיר נוכחי (hidden) לחישוב P&L
     document.getElementById('current-price-input').value=live.price.toFixed(2);
     window._lastDailyChg=live.chg;window._lastDailyChgPct=live.chgPct;
     updateLivePanel(currentTicker,live.price,live.chg,live.chgPct,live.time);
@@ -1255,10 +1248,7 @@ async function refreshLiveCalc(){
       const d=jLoad();const rec=d.find(x=>x.id===currentJournalId);
       if(rec){rec.curP=+live.price.toFixed(2);rec.dailyChg=+live.chg.toFixed(2);rec.dailyChgPct=+live.chgPct.toFixed(2);jSave(d);}
     }
-  }else{
-    tag.innerHTML='<span style="color:var(--red);font-size:11px">שגיאת API</span>';
   }
-  btn.textContent='🔄 מחיר עכשיו';btn.style.pointerEvents='';
 }
 
 // ═══════════════════════════════════════════════
