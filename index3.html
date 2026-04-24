@@ -878,9 +878,8 @@ function applyStop(P,ATR,stop,ticker,date){
   let ex1p,ex2p,ex3p,ex1n,ex2n,ex3n;
   if(isVol){ex1p=entryP*1.20;ex2p=entryP*1.30;ex3p=entryP*1.45;ex1n='+20%';ex2n='+30%';ex3n='+45%';}
   else{ex1p=entryP+3*ATR;ex2p=entryP+4.5*ATR;ex3p=entryP*1.225;ex1n='3R';ex2n='4.5R';ex3n='+22.5%';}
-  const ex1s=entryData[0]?.shares||Math.floor(totalShares*0.40);
-  const ex2s=entryData[1]?.shares||Math.floor((totalShares-ex1s)*0.50);
-  const ex3s=entryData[2]?.shares||Math.max(0,Math.round(totalShares-ex1s-ex2s));
+  const ex1s=Math.floor(totalShares*0.40),rem2=totalShares-ex1s;
+  const ex2s=Math.floor(rem2*0.50),ex3s=Math.max(0,Math.round(rem2-ex2s));
   const ac=isVol?'#c47a0a':'#0a7a45',ab=isVol?'#fef6e4':'#e4f5ed',abd=isVol?'#f5d080':'#80d4a0';
   document.getElementById('adr-banner').innerHTML=
     '<div style="background:'+ab+';border:1.5px solid '+abd+';border-radius:8px;padding:9px 14px;display:flex;align-items:center;gap:10px;margin-bottom:14px">'+
@@ -989,7 +988,7 @@ function renderTrailingStopPanel(P,ATR,ex2p){
 }
 
 function renderTotalProfit(P,ATR,ex1p,ex2p,ex3p,ex1s,ex2s,ex3s,stop,totalShares){
-  const s1=ex1s,s2=ex2s,s3=ex3s;
+  const s1=Math.floor(totalShares*0.40),rem=totalShares-s1,s2=Math.floor(rem*0.50),s3=Math.max(0,Math.round(rem-s2));
   const inv=s1*P+s2*(P+ATR)+s3*(P+2*ATR);
   const avg=window._avgCost||(inv/(s1+s2+s3));
   const e1=parseFloat(document.getElementById('exp-0')?.value)||ex1p;
@@ -1083,6 +1082,7 @@ function onSharesChange(idx,val){
   const cp=parseFloat(document.getElementById('current-price-input').value);
   renderEntries(cp>0?cp:null);
   if(cp>0)updateProfitSummary(cp);
+  renderExitManual();
   syncToJournal();
 }
 
@@ -1127,7 +1127,7 @@ function renderExitManual(){
   let html='';
   for(let i=0;i<3;i++){
     const ex=exitManual[i];
-    const price=ex.price||0,shares=ex.shares||0;
+    const price=ex.price||0,shares=ex.shares||entryData[i]?.shares||0;
     const pl=avg&&price&&shares?(price-avg)*shares:null;
     const plSign=pl!=null&&pl>=0?'+':'-';
     const plDisp=pl!=null?(plSign==='+'?'+'+fmtD(Math.abs(pl)):'-'+fmtD(Math.abs(pl))):'—';
@@ -1140,7 +1140,7 @@ function renderExitManual(){
         'style="background:var(--bg);border:1.5px solid var(--border);border-radius:4px;color:var(--text);padding:5px 8px;font-size:13px;direction:ltr;outline:none;font-family:var(--mono);width:100%" '+
         'onblur="exitManual['+i+'].price=parseFloat(this.value)||null;renderExitManual();syncToJournal()" '+
         'onchange="exitManual['+i+'].price=parseFloat(this.value)||null;renderExitManual()">'+
-      '<input type="number" value="'+(shares || entryData[i]?.shares || '')+'" placeholder="מניות" '+
+      '<input type="number" value="'+(shares||entryData[i]?.shares||'')+'" placeholder="מניות" '+
         'style="background:var(--bg);border:1.5px solid var(--border);border-radius:4px;color:var(--text);padding:5px 8px;font-size:13px;direction:ltr;outline:none;font-family:var(--mono);width:100%" '+
         'onblur="exitManual['+i+'].shares=parseInt(this.value)||null;renderExitManual();syncToJournal()" '+
         'onchange="exitManual['+i+'].shares=parseInt(this.value)||null;renderExitManual()">'+
