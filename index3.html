@@ -1470,9 +1470,13 @@ function jCalcPL(r){
     }
     if(gross!=null){
       net=gross-comm;
-      pct=totalInv>0?(net/totalInv)*100:null;
+      // % מחושב על עלות כוללת כולל עמלות
+      const totalCost=totalInv+comm;
+      pct=totalCost>0?(net/totalCost)*100:null;
+      // R:R = רווח נטו חלקי סיכון מקסימלי (ממוצע-סטופ)*כמות
       var sd=avg-stop;
-      rr=sd>0?(cur>0?cur-avg:0)/sd:null;
+      const maxRisk=sd>0?sd*totalSh:null;
+      rr=maxRisk>0?net/maxRisk:null;
     }
   }
   const remainShCalc=Math.max(0,totalSh-exitSh);
