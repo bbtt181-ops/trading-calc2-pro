@@ -1388,6 +1388,7 @@ function loadRowToCalc(id){
       document.getElementById('journal-notes').value=r.notes||'';
 
       renderEntries(r.curP?parseFloat(r.curP):null);
+      renderStopMgmt();
       renderExitManual();
       if(r.curP)updateProfitSummary(parseFloat(r.curP));
       calcProfit();
