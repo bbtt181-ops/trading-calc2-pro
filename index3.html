@@ -1466,7 +1466,8 @@ function jCalcPL(r){
       rr=sd>0?(cur>0?cur-avg:0)/sd:null;
     }
   }
-  return{avg,totalSh,totalInv,gross,net,pct,rr,comm};
+  const remainShCalc=Math.max(0,totalSh-exitSh);
+  return{avg,totalSh,remainSh:remainShCalc,totalInv,gross,net,pct,rr,comm};
 }
 
 function daysSince(dateStr){
@@ -1532,7 +1533,7 @@ function jRowHtml(r){
 
   return '<tr class="'+rowCls+'" id="jr-'+r.id+'" onclick="selectJRow('+r.id+')" style="cursor:'+(canLoad?'pointer':'default')+'">'+
     '<td><input class="jc jc-text" style="width:60px;font-weight:700" value="'+(r.ticker||'')+'" onblur="jSet('+r.id+',\'ticker\',this.value.toUpperCase());this.value=this.value.toUpperCase()"></td>'+
-    '<td><input class="jc" style="width:48px" type="number" value="'+(r.totalSh||'')+'" onblur="jSet('+r.id+',\'totalSh\',this.value)"></td>'+
+    '<td><input class="jc" style="width:48px" type="number" value="'+(c.remainSh||r.totalSh||'')+'" title="נותרו '+(c.remainSh||r.totalSh||0)+' מניות (קנית '+r.totalSh+', מכרת '+(parseFloat(r.x1s)||0)+(parseFloat(r.x2s)||0)+(parseFloat(r.x3s)||0)+')\'" onblur="jSet('+r.id+',\'totalSh\',this.value)"></td>'+
     '<td><input class="jc" style="width:95px" type="date" value="'+(r.date||'')+'" onblur="jSet('+r.id+',\'date\',this.value)"></td>'+
     '<td><span class="jc-ro muted">'+daysSince(r.date)+'</span></td>'+
     '<td><input class="jc" style="width:65px" type="number" step="0.01" value="'+(r.e1p||'')+'" onblur="jNum('+r.id+',\'e1p\',this.value);jRefreshRow('+r.id+')"></td>'+
