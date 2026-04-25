@@ -284,14 +284,14 @@ input[type=number]{-moz-appearance:textfield}
    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
     <div class="profit-row" style="margin-bottom:0">
      <label>מחיר נוכחי / יציאה:</label>
-     <input type="number" id="current-price-input" placeholder="0.00" step="0.01" oninput="calcProfit();syncToJournal()">
+     <input type="number" id="current-price-input" placeholder="0.00" step="0.01" oninput="calcProfit();renderStopMgmt();syncToJournal()">
     </div>
     <button onclick="refreshLiveCalc()" id="live-calc-btn" style="display:none;background:none;border:1.5px solid #c0d8f0;border-radius:var(--radius-sm);padding:5px 11px;font-size:11px;color:var(--blue);cursor:pointer;font-weight:700">🔄 מחיר עכשיו</button>
     <span id="live-calc-tag" style="font-family:var(--mono);font-size:12px"></span>
    </div>
    <div class="comm-row">
     <label>עמלה:</label>
-    <input type="text" id="trade-commission" placeholder="5.5+5.5" style="width:120px;background:var(--bg);border:1.5px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:5px 8px;font-size:13px;direction:ltr;outline:none;font-family:var(--mono)" oninput="calcProfit();syncToJournal()">
+    <input type="text" id="trade-commission" placeholder="5.5+5.5" style="width:120px;background:var(--bg);border:1.5px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:5px 8px;font-size:13px;direction:ltr;outline:none;font-family:var(--mono)" oninput="calcProfit();renderStopMgmt();syncToJournal()">
     <span id="comm-calc-display" style="font-size:12px;color:var(--muted);font-family:var(--mono)"></span>
     <span style="font-size:11px;color:var(--muted)">מנוכה מה-P&L</span>
    </div>
@@ -878,7 +878,8 @@ function applyStop(P,ATR,stop,ticker,date){
   let ex1p,ex2p,ex3p,ex1n,ex2n,ex3n;
   if(isVol){ex1p=entryP*1.20;ex2p=entryP*1.30;ex3p=entryP*1.45;ex1n='+20%';ex2n='+30%';ex3n='+45%';}
   else{ex1p=entryP+3*ATR;ex2p=entryP+4.5*ATR;ex3p=entryP*1.225;ex1n='3R';ex2n='4.5R';ex3n='+22.5%';}
-  const ex1s=Math.floor(totalShares*0.40),rem2=totalShares-ex1s;
+  const actualTotal=entryData.reduce((s,e,i)=>s+(executedEntries[i]?e.shares:0),0)||totalShares;
+  const ex1s=Math.floor(actualTotal*0.40),rem2=actualTotal-ex1s;
   const ex2s=Math.floor(rem2*0.50),ex3s=Math.max(0,Math.round(rem2-ex2s));
   const ac=isVol?'#c47a0a':'#0a7a45',ab=isVol?'#fef6e4':'#e4f5ed',abd=isVol?'#f5d080':'#80d4a0';
   document.getElementById('adr-banner').innerHTML=
@@ -892,19 +893,50 @@ function applyStop(P,ATR,stop,ticker,date){
     {lbl:'#3',note:ex3n,target:ex3p,pct:'100% אחרון',tagCls:'tag-amber',shares:ex3s,stopDist,P},
   ];
   renderExits();
-  const be=P,lock=P+1.5*ATR;
-  document.getElementById('stop-mgmt-body').innerHTML=[
-    {step:'פתיחה',trigger:'כניסה #1 בוצעה',ns:stop,act:'סטופ ראשוני',mean:'סיכון מלא — המתן לאישור',bg:'#f8f6f2',col:'var(--text)'},
-    {step:'אחרי יציאה #1',trigger:fmtD(ex1p)+' הגיע',ns:be,act:'הזז סטופ → BE',mean:'סיכון אפס — '+(ex2s+ex3s)+' מניות חינם',bg:'#edf3fc',col:'var(--blue)'},
-    {step:'אחרי יציאה #2',trigger:fmtD(ex2p)+' הגיע',ns:lock,act:'הזז סטופ → נועל רווח',mean:'רווח מובטח — '+ex3s+' מניות רצות',bg:'#e8f5ee',col:'var(--green)'},
-  ].map(r=>'<tr style="background:'+r.bg+'"><td><strong>'+r.step+'</strong></td><td><span class="num">'+r.trigger+'</span></td><td><span class="num" style="font-weight:700;color:'+r.col+'">'+fmtD(r.ns)+'</span></td><td style="font-weight:600;color:'+r.col+'">'+r.act+'</td><td style="color:var(--muted)">'+r.mean+'</td></tr>').join('');
+  // BE = ממוצע משוקלל של הכניסות הפעילות
+  const prices=getActivePrices();
+  const activeShares=entryData.map((e,i)=>executedEntries[i]?e.shares:0);
+  const activeCost=activeShares.reduce((s,sh,i)=>s+sh*prices[i],0);
+  const activeTotalSh=activeShares.reduce((s,sh)=>s+sh,0);
+  const be=activeTotalSh>0?(activeCost/activeTotalSh):P;
+  const lock=P+1.5*ATR;
   window._tpParams={P,ATR,ex1p,ex2p,ex3p,ex1s,ex2s,ex3s,stop,totalShares};
   renderTotalProfit(P,ATR,ex1p,ex2p,ex3p,ex1s,ex2s,ex3s,stop,totalShares);
   renderTrailingStopPanel(P,ATR,ex2p);
   renderEntries(ex1p);
+  renderStopMgmt(); // חייב להיות אחרי renderEntries כדי ש-DOM יהיה קיים
   renderExitManual();
   document.getElementById('results').style.display='block';
   document.getElementById('live-calc-btn').style.display=currentTicker&&currentTicker!=='ידני'?'inline-block':'none';
+}
+
+function renderStopMgmt(){
+  if(!window._tpParams)return;
+  const {ex1p,ex2p,ex1s,ex2s,ex3s,stop,ATR,P}=window._tpParams;
+  // קרא מחירים ומניות ישירות מה-DOM — הכי מדויק
+  const domPrices=entryData.map((e,i)=>{
+    const el=document.getElementById('enp-'+i);
+    return el&&parseFloat(el.value)>0?parseFloat(el.value):(customPrices[i]!==null?customPrices[i]:e.defaultPrice);
+  });
+  const domShares=entryData.map((e,i)=>{
+    const el=document.getElementById('ens-'+i);
+    return el&&parseInt(el.value)>0?parseInt(el.value):e.shares;
+  });
+  const activeShares=domShares.map((sh,i)=>executedEntries[i]?sh:0);
+  const activeCost=activeShares.reduce((s,sh,i)=>s+sh*domPrices[i],0);
+  const activeTotalSh=activeShares.reduce((s,sh)=>s+sh,0);
+  // BE כולל עמלות — עמלות מחולקות על כמות המניות הפעילות
+  const comm=evalComm(document.getElementById('trade-commission')?.value||'');
+  const beWithComm=activeTotalSh>0?(activeCost+comm)/activeTotalSh:P;
+  const lock=P+1.5*ATR;
+  const el=document.getElementById('stop-mgmt-body');
+  if(!el)return;
+  const commNote=comm>0?' (+$'+comm.toFixed(2)+' עמלות / '+activeTotalSh+' מניות)':'';
+  el.innerHTML=[
+    {step:'פתיחה',trigger:'כניסה #1 בוצעה',ns:stop,act:'סטופ ראשוני',mean:'סיכון מלא — המתן לאישור',bg:'#f8f6f2',col:'var(--text)',sub:''},
+    {step:'אחרי יציאה #1',trigger:fmtD(ex1p)+' הגיע',ns:beWithComm,act:'הזז סטופ → BE',mean:'סיכון אפס — '+(ex2s+ex3s)+' מניות חינם',bg:'#edf3fc',col:'var(--blue)',sub:commNote},
+    {step:'אחרי יציאה #2',trigger:fmtD(ex2p)+' הגיע',ns:lock,act:'הזז סטופ → נועל רווח',mean:'רווח מובטח — '+ex3s+' מניות רצות',bg:'#e8f5ee',col:'var(--green)',sub:''},
+  ].map(r=>'<tr style="background:'+r.bg+'"><td><strong>'+r.step+'</strong></td><td><span class="num">'+r.trigger+'</span></td><td><span class="num" style="font-weight:700;color:'+r.col+'">'+fmtD(r.ns)+'</span>'+(r.sub?'<div style="font-size:9px;color:var(--muted);margin-top:1px">'+r.sub+'</div>':'')+'</td><td style="font-weight:600;color:'+r.col+'">'+r.act+'</td><td style="color:var(--muted)">'+r.mean+'</td></tr>').join('');
 }
 
 function renderTrailingStopPanel(P,ATR,ex2p){
@@ -1051,10 +1083,10 @@ function renderEntries(cp){
     return '<tr style="'+rowStyle+'">'+
       '<td style="text-align:center"><input type="checkbox" '+(exec?'checked':'')+' onchange="toggleExecEntry('+i+',this.checked)" style="width:16px;height:16px;accent-color:var(--green);cursor:pointer"></td>'+
       '<td>'+e.lbl+'</td>'+
-      '<td><input class="entry-price-input" type="number" value="'+fmt(price,2)+'" step="0.01" onchange="onPriceChange('+i+',this.value)" onblur="onPriceChange('+i+',this.value)"></td>'+
+      '<td><input class="entry-price-input" id="enp-'+i+'" type="number" value="'+fmt(price,2)+'" step="0.01" onchange="onPriceChange('+i+',this.value)" onblur="onPriceChange('+i+',this.value)"></td>'+
       '<td><span class="tag '+e.tagCls+'">'+e.pct+'</span></td>'+
       '<td><span class="num">'+(exec?fmtD(invest):'—')+'</span></td>'+
-      '<td><input class="entry-price-input" type="number" value="'+fmt(sh,0)+'" step="1" min="1" style="width:56px" onchange="onSharesChange('+i+',this.value)" onblur="onSharesChange('+i+',this.value)"></td>'+
+      '<td><input class="entry-price-input" id="ens-'+i+'" type="number" value="'+fmt(sh,0)+'" step="1" min="1" style="width:56px" onchange="onSharesChange('+i+',this.value)" onblur="onSharesChange('+i+',this.value)"></td>'+
       '<td>'+(avg&&exec?'<span class="num">'+fmtD(avg)+'</span>':'<span style="color:var(--muted)">—</span>')+'</td>'+
       '<td>'+pc+'</td></tr>';
   }).join('');
@@ -1062,8 +1094,21 @@ function renderEntries(cp){
 
 function toggleExecEntry(idx,checked){
   executedEntries[idx]=checked;
+  // חשב מחדש מניות יציאה לפי כניסות פעילות בלבד
+  if(window._exitData){
+    const activeTotal=entryData.reduce((s,e,i)=>s+(executedEntries[i]?e.shares:0),0);
+    if(activeTotal>0){
+      const es1=Math.floor(activeTotal*0.40),rem=activeTotal-es1;
+      const es2=Math.floor(rem*0.50),es3=Math.max(0,Math.round(rem-es2));
+      window._exitData[0].shares=es1;
+      window._exitData[1].shares=es2;
+      window._exitData[2].shares=es3;
+    }
+  }
   const cp=parseFloat(document.getElementById('current-price-input').value);
   renderEntries(cp>0?cp:null);
+  renderExits();
+  renderStopMgmt();
   if(cp>0)updateProfitSummary(cp);
   syncToJournal();
 }
@@ -1072,6 +1117,7 @@ function onPriceChange(idx,val){
   const v=parseFloat(val);customPrices[idx]=(v>0)?v:null;
   const cp=parseFloat(document.getElementById('current-price-input').value);
   renderEntries(cp>0?cp:null);if(cp>0)updateProfitSummary(cp);
+  renderStopMgmt();
   syncToJournal();
 }
 
@@ -1079,8 +1125,19 @@ function onSharesChange(idx,val){
   const v=Math.round(parseFloat(val));
   if(!v||v<=0)return;
   entryData[idx].shares=v;
+  // חישוב מחדש של יציאות לפי סך הכניסות בפועל
+  if(window._exitData){
+    const activeTotal=entryData.reduce((s,e,i)=>s+(executedEntries[i]?e.shares:0),0);
+    if(activeTotal>0){
+      const es1=Math.floor(activeTotal*0.40),rem=activeTotal-es1;
+      const es2=Math.floor(rem*0.50),es3=Math.max(0,Math.round(rem-es2));
+      const newShares=[es1,es2,es3];
+      window._exitData.forEach((e,i)=>e.shares=newShares[i]);
+    }
+  }
   const cp=parseFloat(document.getElementById('current-price-input').value);
   renderEntries(cp>0?cp:null);
+  renderExits();
   if(cp>0)updateProfitSummary(cp);
   renderExitManual();
   syncToJournal();
