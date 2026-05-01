@@ -1082,7 +1082,6 @@ function onSharesChange(idx,val){
   const cp=parseFloat(document.getElementById('current-price-input').value);
   renderEntries(cp>0?cp:null);
   if(cp>0)updateProfitSummary(cp);
-  renderExitManual();
   syncToJournal();
 }
 
@@ -1127,7 +1126,7 @@ function renderExitManual(){
   let html='';
   for(let i=0;i<3;i++){
     const ex=exitManual[i];
-    const price=ex.price||0,shares=ex.shares||entryData[i]?.shares||0;
+    const price=ex.price||0,shares=ex.shares||0;
     const pl=avg&&price&&shares?(price-avg)*shares:null;
     const plSign=pl!=null&&pl>=0?'+':'-';
     const plDisp=pl!=null?(plSign==='+'?'+'+fmtD(Math.abs(pl)):'-'+fmtD(Math.abs(pl))):'—';
@@ -1140,7 +1139,7 @@ function renderExitManual(){
         'style="background:var(--bg);border:1.5px solid var(--border);border-radius:4px;color:var(--text);padding:5px 8px;font-size:13px;direction:ltr;outline:none;font-family:var(--mono);width:100%" '+
         'onblur="exitManual['+i+'].price=parseFloat(this.value)||null;renderExitManual();syncToJournal()" '+
         'onchange="exitManual['+i+'].price=parseFloat(this.value)||null;renderExitManual()">'+
-      '<input type="number" value="'+(shares||entryData[i]?.shares||'')+'" placeholder="מניות" '+
+      '<input type="number" value="'+(shares||'')+'" placeholder="מניות" '+
         'style="background:var(--bg);border:1.5px solid var(--border);border-radius:4px;color:var(--text);padding:5px 8px;font-size:13px;direction:ltr;outline:none;font-family:var(--mono);width:100%" '+
         'onblur="exitManual['+i+'].shares=parseInt(this.value)||null;renderExitManual();syncToJournal()" '+
         'onchange="exitManual['+i+'].shares=parseInt(this.value)||null;renderExitManual()">'+
