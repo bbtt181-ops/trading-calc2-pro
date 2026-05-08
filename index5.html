@@ -217,7 +217,7 @@ input[type=number]{-moz-appearance:textfield}
    <span class="ils-chip-label">P&amp;L</span>
    <span class="ils-chip-val" id="chip-pnl-val">—</span>
   </div>
-  <button class="btn-new-trade" onclick="newTrade()">🔄 מניה חדשה</button>
+  <button class="btn-new-trade" id="btn-new-trade" onclick="newTrade()">🔄 מניה חדשה</button>
  </div>
 
  <div class="input-row" style="grid-template-columns:1fr 1fr 1fr">
@@ -458,7 +458,266 @@ input[type=number]{-moz-appearance:textfield}
  </div>
 </div>
 </div><!-- /content -->
-').textContent=fmtD(totalPos);
+<script>
+const CAPITAL=50000,MAX_POS=5000;
+const TWELVEDATA_KEY='bd65f782ec4e4929828b33032ab4a42e';
+const STORAGE_KEY='pro_tj_v2';
+const ATR_STORE_KEY='pro_atr_store_v2';
+let riskPct=1,currentPrice=null,currentATR=null,currentTicker='',currentDate='';
+let currentJournalId=null,entryData=[],customPrices=[null,null,null];
+let executedEntries=[true,false,false];
+let exitManual=[{price:null,shares:null,date:'',executed:false},{price:null,shares:null,date:'',executed:false},{price:null,shares:null,date:'',executed:false}];
+let priceFromAPI=false,jFilter='all',jSelectedId=null;
+let APPS_SCRIPT_URL=localStorage.getItem('gs_url')||'';
+let syncMode=APPS_SCRIPT_URL?'cloud':'local';
+let ilsRate=parseFloat(localStorage.getItem('ils_rate'))||0;
+document.getElementById('trade-date').value=new Date().toISOString().split('T')[0];
+if(ilsRate>0)document.getElementById('ils-rate').value=ilsRate.toFixed(2);
+
+function getIls(){return parseFloat(document.getElementById('ils-rate').value)||0;}
+function fmtIls(n){return'₪'+Math.abs(n).toLocaleString('he-IL',{minimumFractionDigits:0,maximumFractionDigits:0});}
+function onIlsChange(){
+  ilsRate=getIls();
+  if(ilsRate>0)localStorage.setItem('ils_rate',ilsRate.toFixed(4));
+  refreshIlsChips();
+  const r=ilsRate;
+  if(r>0){
+    const posUsd=parseFloat((document.getElementById('val-pos').textContent||'').replace(/[$,]/g,''))||0;
+    const riskUsd=parseFloat((document.getElementById('val-risk').textContent||'').replace(/[$,]/g,''))||0;
+    const cp=document.getElementById('card-pos-ils'),cr=document.getElementById('card-risk-ils');
+    if(cp&&posUsd){cp.style.display='block';cp.textContent=fmtIls(posUsd*r);}
+    if(cr&&riskUsd){cr.style.display='block';cr.textContent=fmtIls(riskUsd*r);}
+  }
+  if(document.getElementById('results').style.display!=='none'){
+    const cp2=parseFloat(document.getElementById('current-price-input').value)||0;
+    renderEntries(cp2>0?cp2:null);renderExits();
+    if(cp2>0)updateProfitSummary(cp2);
+  }
+}
+function refreshIlsChips(){
+  const r=getIls();
+  if(!r){['chip-pos','chip-risk','chip-pnl'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});return;}
+  const posUsd=parseFloat((document.getElementById('val-pos').textContent||'').replace(/[$,]/g,''))||0;
+  const riskUsd=parseFloat((document.getElementById('val-risk').textContent||'').replace(/[$,]/g,''))||0;
+  if(posUsd)showChip('chip-pos','chip-pos-val',posUsd*r,'pos');
+  if(riskUsd)showChip('chip-risk','chip-risk-val',riskUsd*r,'neg');
+  const psEl=document.getElementById('profit-summary');
+  if(psEl&&psEl.style.display!=='none'){
+    let netUsd=null;
+    psEl.querySelectorAll('.profit-stat').forEach(stat=>{
+      const lbl=stat.querySelector('.profit-stat-label');
+      if(lbl&&lbl.textContent.includes('נטו')){const v=stat.querySelector('.profit-stat-val');if(v)netUsd=parseFloat(v.textContent.replace(/[$,+]/g,''));}
+    });
+    if(netUsd!=null)showChip('chip-pnl','chip-pnl-val',netUsd*r,netUsd>=0?'pos':'neg');
+  }
+}
+function showChip(chipId,valId,amount,cls){
+  const chip=document.getElementById(chipId),val=document.getElementById(valId);if(!chip||!val)return;
+  chip.style.display='inline-flex';
+  val.textContent=(amount>=0?'+':'')+fmtIls(Math.abs(amount));
+  val.style.color=cls==='pos'?'var(--green)':cls==='neg'?'var(--red)':'var(--text)';
+}
+async function fetchIlsRate(){
+  const btn=document.querySelector('.ils-fetch-btn'),st=document.getElementById('ils-status');
+  btn.textContent='⏳';btn.style.pointerEvents='none';st.textContent='שולף שער...';st.style.color='var(--muted)';
+  try{
+    const res=await fetch('https://api.twelvedata.com/price?symbol=USD/ILS&apikey='+TWELVEDATA_KEY);
+    const data=await res.json();
+    if(!data.price)throw new Error('no price');
+    const rate=parseFloat(data.price);
+    document.getElementById('ils-rate').value=rate.toFixed(2);
+    ilsRate=rate;localStorage.setItem('ils_rate',rate.toFixed(4));
+    st.textContent='✓ '+rate.toFixed(3);st.style.color='var(--green)';
+    onIlsChange();
+  }catch(e){st.textContent='⚠️ הזן ידנית';st.style.color='var(--amber)';}
+  btn.textContent='🔄 שלוף שער';btn.style.pointerEvents='';
+  setTimeout(()=>st.textContent='',5000);
+}
+function ilsCell(usd){const r=getIls();if(!r||!usd)return'<span style="color:var(--muted);font-size:11px">—</span>';return'<span style="color:var(--blue);font-size:12px;font-family:var(--mono)">'+fmtIls(usd*r)+'</span>';}
+function ilsCellPL(usd){const r=getIls();if(!r||usd==null)return'<span style="color:var(--muted);font-size:11px">—</span>';const ils=usd*r;return'<span style="font-size:12px;font-family:var(--mono);color:'+(ils>=0?'var(--green)':'var(--red)')+'">'+(ils>=0?'+':'')+fmtIls(Math.abs(ils))+'</span>';}
+
+function atrStore(){try{return JSON.parse(localStorage.getItem(ATR_STORE_KEY)||'{}')}catch(e){return{}}}
+function atrSave(id,atr,ep,date){const s=atrStore();s[id]={atr,entryPrice:ep,date,savedAt:new Date().toISOString()};localStorage.setItem(ATR_STORE_KEY,JSON.stringify(s));}
+function atrGet(id){return atrStore()[id]||null;}
+function atrDelete(id){const s=atrStore();delete s[id];localStorage.setItem(ATR_STORE_KEY,JSON.stringify(s));}
+
+function jLoad(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]')}catch(e){return[]}}
+function jSave(d){
+  localStorage.setItem(STORAGE_KEY,JSON.stringify(d));
+  if(syncMode==='cloud')cloudSave(d).then(ok=>{const ind=document.getElementById('sync-indicator');if(ind){ind.textContent=ok?'☁️ נשמר':'⚠️ שגיאת ענן';setTimeout(()=>ind.textContent='',2000);}});
+}
+function setGsUrl(url){APPS_SCRIPT_URL=url.trim();localStorage.setItem('gs_url',APPS_SCRIPT_URL);syncMode=APPS_SCRIPT_URL?'cloud':'local';updateSyncStatus();}
+function updateSyncStatus(){
+  const bar=document.getElementById('sync-bar'),lbl=document.getElementById('sync-lbl');if(!bar||!lbl)return;
+  if(syncMode==='cloud'){bar.style.background='#e4f5ed';bar.style.borderColor='#0a7a45';lbl.innerHTML='☁️ מסונכרן עם Google Sheets';lbl.style.color='#0a7a45';}
+  else{bar.style.background='#fff8e4';bar.style.borderColor='#c47a0a';lbl.innerHTML='💾 שמירה מקומית בלבד';lbl.style.color='#c47a0a';}
+}
+async function cloudLoad(){if(!APPS_SCRIPT_URL)return null;try{const res=await fetch(APPS_SCRIPT_URL+'?action=load&t='+Date.now());const data=JSON.parse(await res.text());if(Array.isArray(data))return data;}catch(e){}return null;}
+async function cloudSave(data){if(!APPS_SCRIPT_URL)return false;try{const form=document.getElementById('gs-sync-form'),dataEl=document.getElementById('gs-sync-data');if(form&&dataEl){form.action=APPS_SCRIPT_URL;dataEl.value=JSON.stringify(data);form.submit();return true;}return false;}catch(e){return false;}}
+async function jLoadCloud(){const cloud=await cloudLoad();if(cloud){localStorage.setItem(STORAGE_KEY,JSON.stringify(cloud));renderJournal();const ind=document.getElementById('sync-indicator');if(ind){ind.textContent='☁️ נטען מהענן';setTimeout(()=>ind.textContent='',2500);}}}
+async function jPushAll(){if(!APPS_SCRIPT_URL){alert('חבר תחילה לGoogle Sheets');return;}const d=jLoad(),ok=await cloudSave(d);const ind=document.getElementById('sync-indicator');if(ind){ind.textContent=ok?'☁️ '+d.length+' רשומות נדחפו':'⚠️ שגיאה';setTimeout(()=>ind.textContent='',3000);}}
+
+let liveRefreshTimer=null;
+async function fetchLivePrice(ticker){try{const res=await fetch('https://api.twelvedata.com/quote?symbol='+ticker+'&apikey='+TWELVEDATA_KEY);const data=await res.json();if(data.status==='error'||!data.close)throw new Error();return{price:parseFloat(data.close),chg:parseFloat(data.change)||0,chgPct:parseFloat(data.percent_change)||0,time:new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})};}catch(e){return null;}}
+function updateLivePanel(ticker,price,chg,chgPct,time){
+  const panel=document.getElementById('live-panel');if(!panel)return;panel.style.display='flex';
+  document.getElementById('lp-ticker').textContent=ticker;
+  document.getElementById('lp-price').textContent='$'+price.toFixed(2);
+  const chgEl=document.getElementById('lp-chg');
+  chgEl.textContent=(chg>=0?'+':'')+chg.toFixed(2)+' ('+(chgPct>=0?'+':'')+chgPct.toFixed(2)+'%)';
+  chgEl.className='live-price-chg '+(chg>=0?'pos':'neg');
+  if(time)document.getElementById('lp-time').textContent='עודכן '+time;
+}
+async function refreshLivePrice(){
+  if(!currentTicker||currentTicker==='ידני')return;
+  const btn=document.getElementById('live-refresh-btn');if(btn){btn.textContent='⏳';btn.style.pointerEvents='none';}
+  const live=await fetchLivePrice(currentTicker);
+  if(live){
+    updateLivePanel(currentTicker,live.price,live.chg,live.chgPct,live.time);
+    document.getElementById('current-price-input').value=live.price.toFixed(2);
+    window._lastDailyChg=live.chg;window._lastDailyChgPct=live.chgPct;
+    const scp=document.getElementById('stock-close-price'),scc=document.getElementById('stock-close-chg');
+    if(scp)scp.textContent='$'+live.price.toFixed(2);
+    if(scc){scc.textContent=(live.chg>=0?'+':'')+live.chg.toFixed(2)+' ('+(live.chgPct>=0?'+':'')+live.chgPct.toFixed(2)+'%)';scc.style.color=live.chg>=0?'var(--green)':'var(--red)';}
+    calcProfit();syncToJournal();
+    if(currentJournalId){const d=jLoad();const r=d.find(x=>x.id===currentJournalId);if(r){r.curP=+live.price.toFixed(2);r.dailyChg=+live.chg.toFixed(2);r.dailyChgPct=+live.chgPct.toFixed(2);jSave(d);}}
+    const badge=document.getElementById('live-auto-badge');if(badge){badge.style.display='inline';setTimeout(()=>badge.style.display='none',3000);}
+  }
+  if(btn){btn.textContent='🔄 עדכן מחיר';btn.style.pointerEvents='';}
+}
+
+function toggleManual(){const el=document.getElementById('manual-inputs');el.style.display=el.style.display==='none'||el.style.display===''?'block':'none';}
+function newTrade(){
+  currentJournalId=null;currentPrice=null;currentATR=null;currentTicker='';currentDate='';
+  priceFromAPI=false;window._lockedEntryP=null;
+  customPrices=[null,null,null];executedEntries=[true,false,false];
+  exitManual=[{price:null,shares:null,date:'',executed:false},{price:null,shares:null,date:'',executed:false},{price:null,shares:null,date:'',executed:false}];
+  document.getElementById('ticker').value='';
+  document.getElementById('price-status').innerHTML='';
+  document.getElementById('results').style.display='none';
+  document.getElementById('placeholder').style.display='block';
+  document.getElementById('profit-summary').style.display='none';
+  document.getElementById('current-price-input').value='';
+  document.getElementById('loaded-banner').style.display='none';
+  document.getElementById('atr-lock-display').style.display='none';
+  document.getElementById('live-panel').style.display='none';
+  document.getElementById('live-calc-btn').style.display='none';
+  document.getElementById('trade-date').value=new Date().toISOString().split('T')[0];
+  document.getElementById('journal-notes').value='';
+  document.getElementById('journal-status').value='open';
+  document.getElementById('trade-commission').value='';
+  // ← תיקון: מסתיר רק chips, לא את הכפתור עצמו
+  ['chip-pos','chip-risk','chip-pnl'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});
+  if(liveRefreshTimer){clearInterval(liveRefreshTimer);liveRefreshTimer=null;}
+}
+function runManual(){
+  const ticker=document.getElementById('ticker').value.trim().toUpperCase()||'ידני';
+  const price=parseFloat(document.getElementById('manual-price').value);
+  const atr=parseFloat(document.getElementById('manual-atr').value);
+  if(!price||price<=0){alert('הזן מחיר כניסה תקין');return;}
+  if(!atr||atr<=0){alert('הזן ATR תקין');return;}
+  document.getElementById('warn-box').classList.remove('on');
+  document.getElementById('results').style.display='none';
+  document.getElementById('placeholder').style.display='none';
+  document.getElementById('current-price-input').value='';
+  document.getElementById('profit-summary').style.display='none';
+  customPrices=[null,null,null];executedEntries=[true,false,false];
+  exitManual=[{price:null,shares:null,date:'',executed:false},{price:null,shares:null,date:'',executed:false},{price:null,shares:null,date:'',executed:false}];
+  currentJournalId=null;currentPrice=price;currentATR=atr;currentTicker=ticker;currentDate='ידני';priceFromAPI=false;
+  document.getElementById('price-status').innerHTML=ticker+' | $'+price.toFixed(2)+'&nbsp;<span style="color:var(--muted)">ATR: $'+atr.toFixed(2)+'</span>';
+  renderResults(price,atr,ticker,'ידני');
+}
+function setRisk(v,el){
+  riskPct=v;document.querySelectorAll('.risk-btn').forEach(b=>b.classList.remove('active'));el.classList.add('active');
+  if(!currentPrice||!currentATR)return;
+  const ep=window._lockedEntryP||currentPrice,s=parseFloat(document.getElementById('manual-stop')?.value);
+  if(s>0)applyStop(ep,currentATR,s,currentTicker,currentDate);
+  else renderResults(ep,currentATR,currentTicker,currentDate);
+}
+function evalComm(s){if(!s&&s!==0)return 0;if(typeof s==='number')return s;try{const clean=String(s).replace(/[^\d+\-.*\/() ]/g,'');const r=Function('"use strict";return ('+clean+')')();return isNaN(r)?0:Math.abs(r);}catch(e){return parseFloat(s)||0;}}
+function fmtD(n){return'$'+Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}
+function fmt(n,d){return Number(n).toFixed(d!==undefined?d:2)}
+
+let debounceTimer=null;
+function onTickerBlur(){
+  const t=document.getElementById('ticker').value.trim().toUpperCase();
+  if(!t)return;
+  if(t!==currentTicker&&currentTicker&&!currentJournalId)newTrade();
+  clearTimeout(debounceTimer);debounceTimer=setTimeout(()=>fetchAll(t),400);
+}
+async function fetchAll(ticker){
+  const spinner=document.getElementById('spinner'),status=document.getElementById('price-status');
+  spinner.classList.add('on');status.textContent='שולף נתונים...';
+  document.getElementById('warn-box').classList.remove('on');
+  document.getElementById('results').style.display='none';
+  document.getElementById('placeholder').style.display='none';
+  if(!currentJournalId){document.getElementById('current-price-input').value='';document.getElementById('profit-summary').style.display='none';customPrices=[null,null,null];exitManual=[{price:null,shares:null,date:'',executed:false},{price:null,shares:null,date:'',executed:false},{price:null,shares:null,date:'',executed:false}];}
+  try{
+    const res=await fetch('https://api.twelvedata.com/time_series?symbol='+ticker+'&interval=1day&outputsize=60&apikey='+TWELVEDATA_KEY);
+    const data=await res.json();
+    if(data.status==='error')throw new Error(data.message||'שגיאת API');
+    const vals=data.values;if(!vals||!vals.length)throw new Error('לא נמצאו נתונים עבור '+ticker);
+    const latestDate=vals[0].datetime,latestClose=parseFloat(vals[0].close);
+    const prevClose=vals.length>1?parseFloat(vals[1].close):latestClose;
+    const changePct=((latestClose-prevClose)/prevClose)*100;
+    const freshATR=calcATR_TD(vals,21);if(!freshATR)throw new Error('לא מספיק נתונים לחישוב ATR');
+    let useATR=freshATR,useEntryP=latestClose,atrIsLocked=false;
+    if(currentJournalId){const locked=atrGet(currentJournalId);if(locked&&locked.atr){useATR=locked.atr;if(locked.entryPrice)useEntryP=locked.entryPrice;atrIsLocked=true;const badge=document.getElementById('atr-lock-badge');if(badge)badge.textContent='🔒 ATR נעול: $'+useATR.toFixed(4)+' | כניסה: $'+useEntryP.toFixed(2)+' ('+locked.date+')';document.getElementById('atr-lock-display').style.display='block';}}
+    else{document.getElementById('atr-lock-display').style.display='none';}
+    currentPrice=latestClose;currentATR=useATR;currentTicker=ticker;currentDate=latestDate;
+    window._lockedEntryP=useEntryP;priceFromAPI=true;
+    window._lastDailyChg=latestClose-prevClose;window._lastDailyChgPct=changePct;
+    const cs=(changePct>=0?'+':'')+fmt(changePct,2)+'%',cc=changePct>=0?'var(--green)':'var(--red)';
+    const lockStr=atrIsLocked?' <span style="background:#e8f2fb;color:#1d6fa5;font-size:9px;padding:1px 6px;border-radius:10px;font-weight:700">ATR נעול</span>':'';
+    status.innerHTML=ticker+' | '+fmtD(latestClose)+'&nbsp;<span style="color:'+cc+';font-weight:700">'+cs+'</span>'+lockStr;
+    updateLivePanel(ticker,latestClose,latestClose-prevClose,changePct,'');
+    const scp=document.getElementById('stock-close-price'),scc=document.getElementById('stock-close-chg');
+    if(scp)scp.textContent='$'+latestClose.toFixed(2);
+    if(scc){const dchg=latestClose-prevClose;scc.textContent=(dchg>=0?'+':'')+dchg.toFixed(2)+' ('+(changePct>=0?'+':'')+changePct.toFixed(2)+'%)';scc.style.color=dchg>=0?'var(--green)':'var(--red)';}
+    renderResults(useEntryP,useATR,ticker,latestDate);
+    if(priceFromAPI)document.getElementById('current-price-input').value=fmt(currentPrice,2);
+    calcProfit();document.getElementById('live-calc-btn').style.display='inline-block';
+  }catch(e){
+    status.innerHTML='<span style="color:var(--red)">'+e.message+'</span>';
+    document.getElementById('placeholder').style.display='block';document.getElementById('placeholder').textContent=e.message;
+    currentPrice=null;currentATR=null;
+  }finally{spinner.classList.remove('on');}
+}
+function calcATR_TD(vals,period){
+  const trs=[];for(let i=0;i<Math.min(vals.length-1,period*3);i++){const high=parseFloat(vals[i].high),low=parseFloat(vals[i].low),pc=parseFloat(vals[i+1].close);trs.push(Math.max(high-low,Math.abs(high-pc),Math.abs(low-pc)));}
+  if(trs.length<period)return null;let atr=trs.slice(0,period).reduce((a,b)=>a+b,0)/period;for(let i=period;i<trs.length;i++)atr=(atr*(period-1)+trs[i])/period;return atr;
+}
+function renderResults(P,ATR,ticker,date){
+  const atrStop=P-1.5*ATR,atrStopPct=((P-atrStop)/P)*100,altStop=P*0.93;
+  const warnBox=document.getElementById('warn-box'),cardStop=document.getElementById('card-stop');
+  let stop;
+  if(atrStopPct>7){stop=altStop;warnBox.innerHTML='⚠️ הסטופ המחושב ('+fmt(atrStopPct,1)+'% מ-P) חורג מ-7% — עבר אוטומטית לסטופ 7%: <strong>'+fmtD(altStop)+'</strong>';warnBox.classList.add('on');cardStop.classList.add('warn');cardStop.classList.remove('c-teal');}
+  else{stop=atrStop;warnBox.classList.remove('on');cardStop.classList.remove('warn');cardStop.classList.add('c-teal');}
+  document.getElementById('stop-override-row').style.display='block';
+  document.getElementById('manual-stop').value=fmt(stop,2);
+  document.getElementById('stop-pct-label').textContent=fmt(((P-stop)/P)*100,1)+'% מ-P';
+  window._lastP=P;window._lastATR=ATR;window._lastTicker=ticker;window._lastDate=date;
+  applyStop(P,ATR,stop,ticker,date);
+}
+function onStopChange(){
+  const stop=parseFloat(document.getElementById('manual-stop').value);if(!stop||stop<=0||!window._lastP)return;
+  const ep=window._lockedEntryP||window._lastP;
+  document.getElementById('stop-pct-label').textContent=fmt(((ep-stop)/ep)*100,1)+'% מ-P';
+  applyStop(ep,window._lastATR,stop,window._lastTicker,window._lastDate);
+}
+function applyStop(P,ATR,stop,ticker,date){
+  const stopPct=((P-stop)/P)*100,riskDollar=CAPITAL*(riskPct/100),stopDist=P-stop;
+  let totalShares=riskDollar/stopDist,totalPos=totalShares*P;
+  const cardPos=document.getElementById('card-pos');
+  if(totalPos>MAX_POS){totalPos=MAX_POS;totalShares=totalPos/P;cardPos.classList.add('capped');cardPos.classList.remove('c-purple');}
+  else{cardPos.classList.remove('capped');cardPos.classList.add('c-purple');}
+  const actualRisk=totalShares*stopDist;
+  const r=getIls();
+  document.getElementById('val-atr').textContent=fmtD(ATR);
+  document.getElementById('sub-atr').textContent=ticker+' · '+date+' · '+fmt(ATR/P*100,1)+'% מ-P';
+  document.getElementById('val-stop').textContent=fmtD(stop);
+  document.getElementById('sub-stop').textContent=fmt(stopPct,1)+'% מ-P';
+  document.getElementById('val-pos').textContent=fmtD(totalPos);
   document.getElementById('sub-pos').innerHTML='<span style="font-size:16px;font-weight:800;color:var(--text);font-family:var(--mono)">'+Math.round(totalShares)+'</span><span style="font-size:11px;color:var(--muted);margin-right:4px"> מניות</span>'+(totalPos>=MAX_POS?'<span style="font-size:10px;color:var(--amber)"> (מוגבל)</span>':'');
   const cpils=document.getElementById('card-pos-ils'),crils=document.getElementById('card-risk-ils');
   if(r>0){if(cpils){cpils.style.display='block';cpils.textContent=fmtIls(totalPos*r);}if(crils){crils.style.display='block';crils.textContent=fmtIls(actualRisk*r);}}
@@ -486,7 +745,6 @@ input[type=number]{-moz-appearance:textfield}
     {lbl:'#3',note:ex3n,target:ex3p,pct:'100% אחרון',tagCls:'tag-amber',shares:ex3s,stopDist,P},
   ];
   renderExits();
-  // ── ניהול סטופ — BE = ממוצע משוקלל ──
   const beStop=window._avgCost||P;
   const lockStop=P+1.5*ATR;
   document.getElementById('stop-mgmt-body').innerHTML=[
@@ -504,6 +762,7 @@ input[type=number]{-moz-appearance:textfield}
   document.getElementById('live-calc-btn').style.display=currentTicker&&currentTicker!=='ידני'?'inline-block':'none';
   refreshIlsChips();
 }
+
 function renderTrailingStopPanel(P,ATR,ex2p){
   const panel=document.getElementById('trailing-stop-panel');if(!panel)return;
   panel.style.display='block';
