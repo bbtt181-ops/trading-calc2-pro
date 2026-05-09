@@ -468,7 +468,7 @@ let currentJournalId=null,entryData=[],customPrices=[null,null,null];
 let executedEntries=[true,false,false];
 let exitManual=[{price:null,shares:null,date:'',executed:false},{price:null,shares:null,date:'',executed:false},{price:null,shares:null,date:'',executed:false}];
 let priceFromAPI=false,jFilter='all',jSelectedId=null;
-let APPS_SCRIPT_URL=localStorage.getItem('gs_url')||'';
+const DEFAULT_GS_URL='https://script.google.com/macros/s/AKfycbwRIhK66_fHb_E9gSpQEbuOXbIbY-KWqAVdZIh4GTGRyebTMzgaMj1QYJkCpO5k2B0d/exec'; let APPS_SCRIPT_URL=localStorage.getItem('gs_url')||DEFAULT_GS_URL;
 let syncMode=APPS_SCRIPT_URL?'cloud':'local';
 let ilsRate=parseFloat(localStorage.getItem('ils_rate'))||0;
 document.getElementById('trade-date').value=new Date().toISOString().split('T')[0];
